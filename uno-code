@@ -1,94 +1,96 @@
 #include <math.h>
 
-#define SERIES_RESISTOR 10000
-#define NTC_NOMINAL 10000
-#define TEMPERATURE_NOMINAL 25
-#define BETA_COEFFICIENT 3950
-#define FAN_PIN 13
+const int fanPin = 13;
+const int seriesResistor = 10000;
 
-enum FanState { OFF, HALF, FULL };
-FanState fanState = OFF;
+const int ntcNominalResistance = 10000;
+const int ntcNominalTemp = 25;
+const int betaCoefficient = 3950;
+
+#define FAN_OFF  0
+#define FAN_HALF 1
+#define FAN_FULL 2
+
+int fanMode = FAN_OFF;
 
 unsigned long previousMillis = 0;
-const long interval = 100; // Interval for temperature reading and PWM period
+const long readInterval = 500;
 
 void setup() {
-  pinMode(FAN_PIN, OUTPUT);
+  pinMode(fanPin, OUTPUT);
   Serial.begin(9600);
 }
 
 void loop() {
   unsigned long currentMillis = millis();
-  
-  if (currentMillis - previousMillis >= interval) {
+
+  if (currentMillis - previousMillis >= readInterval) {
     previousMillis = currentMillis;
+
+    float tempC = readTemperature();
     
-    float temperature = readTemperature();
-    updateFanState(temperature);
-    printStatus(temperature);
+    if (tempC < 25.0) {
+      fanMode = FAN_OFF;
+    } else if (tempC >= 25.0 && tempC < 30.0) {
+      fanMode = FAN_HALF;
+    } else {
+      fanMode = FAN_FULL;
+    }
+
+    printStatus(tempC);
   }
   
-  controlFan();
+  runTheFan();
 }
 
 float readTemperature() {
   int adcValue = analogRead(A0);
-  float resistance = SERIES_RESISTOR / (1023.0 / adcValue - 1);
   
-  float steinhart = resistance / NTC_NOMINAL;
+  float resistance = seriesResistor / (1023.0 / adcValue - 1.0);
+  
+  float steinhart;
+  steinhart = resistance / ntcNominalResistance;
   steinhart = log(steinhart);
-  steinhart /= BETA_COEFFICIENT;
-  steinhart += 1.0 / (TEMPERATURE_NOMINAL + 273.15);
+  steinhart /= betaCoefficient;
+  steinhart += 1.0 / (ntcNominalTemp + 273.15);
   steinhart = 1.0 / steinhart;
-  float tempC = steinhart - 273.15;
+  float tempKelvin = steinhart;
+  
+  float tempC = tempKelvin - 273.15;
   
   return tempC;
 }
 
-void updateFanState(float tempC) {
-  if (tempC < 25) {
-    fanState = OFF;
-  } else if (tempC < 30) {
-    fanState = HALF;
-  } else {
-    fanState = FULL;
+void runTheFan() {
+  switch (fanMode) {
+    case FAN_OFF:
+      digitalWrite(fanPin, LOW);
+      break;
+
+    case FAN_HALF:
+      digitalWrite(fanPin, (millis() % 20) < 10);
+      break;
+
+    case FAN_FULL:
+      digitalWrite(fanPin, HIGH);
+      break;
   }
 }
 
 void printStatus(float tempC) {
-  Serial.print("Temperature: ");
+  Serial.print("Temp: ");
   Serial.print(tempC);
-  Serial.print(" °C, Fan: ");
+  Serial.print(" C  |  Fan is: ");
   
-  switch (fanState) {
-    case OFF: Serial.println("OFF"); break;
-    case HALF: Serial.println("50%"); break;
-    case FULL: Serial.println("100%"); break;
-  }
-}
-
-void controlFan() {
-  unsigned long currentMillis = millis();
-  static unsigned long pwmStartTime = 0;
-  static bool isFanOn = false;
-  
-  switch (fanState) {
-    case OFF:
-      digitalWrite(FAN_PIN, LOW);
+  switch (fanMode) {
+    case FAN_OFF:
+      Serial.println("OFF");
       break;
-    case HALF:
-      if (isFanOn && currentMillis - pwmStartTime >= 50) {
-        digitalWrite(FAN_PIN, LOW);
-        isFanOn = false;
-        pwmStartTime = currentMillis;
-      } else if (!isFanOn && currentMillis - pwmStartTime >= 50) {
-        digitalWrite(FAN_PIN, HIGH);
-        isFanOn = true;
-        pwmStartTime = currentMillis;
-      }
+    case FAN_HALF:
+      Serial.println("Running at 50% Speed");
       break;
-    case FULL:
-      digitalWrite(FAN_PIN, HIGH);
+    case FAN_FULL:
+      Serial.println("Running at FULL Speed");
       break;
   }
 }
