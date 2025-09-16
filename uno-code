@@ -1,0 +1,94 @@
+#include <math.h>
+
+#define SERIES_RESISTOR 10000
+#define NTC_NOMINAL 10000
+#define TEMPERATURE_NOMINAL 25
+#define BETA_COEFFICIENT 3950
+#define FAN_PIN 13
+
+enum FanState { OFF, HALF, FULL };
+FanState fanState = OFF;
+
+unsigned long previousMillis = 0;
+const long interval = 100; // Interval for temperature reading and PWM period
+
+void setup() {
+  pinMode(FAN_PIN, OUTPUT);
+  Serial.begin(9600);
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+    
+    float temperature = readTemperature();
+    updateFanState(temperature);
+    printStatus(temperature);
+  }
+  
+  controlFan();
+}
+
+float readTemperature() {
+  int adcValue = analogRead(A0);
+  float resistance = SERIES_RESISTOR / (1023.0 / adcValue - 1);
+  
+  float steinhart = resistance / NTC_NOMINAL;
+  steinhart = log(steinhart);
+  steinhart /= BETA_COEFFICIENT;
+  steinhart += 1.0 / (TEMPERATURE_NOMINAL + 273.15);
+  steinhart = 1.0 / steinhart;
+  float tempC = steinhart - 273.15;
+  
+  return tempC;
+}
+
+void updateFanState(float tempC) {
+  if (tempC < 25) {
+    fanState = OFF;
+  } else if (tempC < 30) {
+    fanState = HALF;
+  } else {
+    fanState = FULL;
+  }
+}
+
+void printStatus(float tempC) {
+  Serial.print("Temperature: ");
+  Serial.print(tempC);
+  Serial.print(" °C, Fan: ");
+  
+  switch (fanState) {
+    case OFF: Serial.println("OFF"); break;
+    case HALF: Serial.println("50%"); break;
+    case FULL: Serial.println("100%"); break;
+  }
+}
+
+void controlFan() {
+  unsigned long currentMillis = millis();
+  static unsigned long pwmStartTime = 0;
+  static bool isFanOn = false;
+  
+  switch (fanState) {
+    case OFF:
+      digitalWrite(FAN_PIN, LOW);
+      break;
+    case HALF:
+      if (isFanOn && currentMillis - pwmStartTime >= 50) {
+        digitalWrite(FAN_PIN, LOW);
+        isFanOn = false;
+        pwmStartTime = currentMillis;
+      } else if (!isFanOn && currentMillis - pwmStartTime >= 50) {
+        digitalWrite(FAN_PIN, HIGH);
+        isFanOn = true;
+        pwmStartTime = currentMillis;
+      }
+      break;
+    case FULL:
+      digitalWrite(FAN_PIN, HIGH);
+      break;
+  }
+}
